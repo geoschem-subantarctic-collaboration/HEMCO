@@ -252,6 +252,34 @@ CONTAINS
     LOGICAL                :: ERR
     CHARACTER(LEN=255)     :: MSG, LOC
 
+#ifdef PERTURB_WIND_ENV_VAR
+   ! Wind perturbation with the size of the perturbation set at runtime by an environment variable
+   ! This block of code would be better defined in a function, but it is only used in three (now four) places
+   ! so it has been copied/pasted into place to avoid messing with the architecture of GEOS-Chem
+   ! The perturbation amount is initialised once and the value cached, just in case the environment
+   ! variable access is slow (compared with the other jobs the model is doing)
+   real*8, save :: wind_speed_perturbation = 0.0
+   logical, save :: initialized = .false.
+   character(len=128) :: env_var_contents
+   integer :: stat
+
+   if (.not. initialized) then
+      call get_environment_variable( &
+            "GC_EXPERIMENT_WIND_PERTURB", env_var_contents, status=stat)
+      if (stat == 0) then
+         read(env_var_contents, *, iostat=stat) wind_speed_perturbation
+         if (stat /= 0) then
+            error stop "Invalid GC_EXPERIMENT_WIND_PERTURB environment variable"
+         end if
+         PRINT *, "Wind pertubation experiment active in HEMCO for SSA emissions. &
+                  &Multiplicative factor GC_EXPERIMENT_WIND_PERTURB:", wind_speed_perturbation
+      else
+         error stop "GC_EXPERIMENT_WIND_PERTURB environment variable is not set."
+      end if
+      initialized = .true.
+   end if
+#endif
+
     !=================================================================
     ! HCOX_SeaSalt_Run begins here!
     !=================================================================
@@ -346,6 +374,13 @@ CONTAINS
        ! Wind speed at 10 m altitude [m/s]
        W10M = SQRT( ExtState%U10M%Arr%Val(I,J)**2 &
                   + ExtState%V10M%Arr%Val(I,J)**2 )
+
+#ifdef PERTURB_WIND_ENV_VAR
+       ! apply wind speed pertubation inside the 50S-60S latitude band
+       IF ( HcoState%Grid%YMid%Val(I,J) >= -60.0 .and.  HcoState%Grid%YMid%Val(I,J) <= -50.0) THEN
+         W10M = W10M * wind_speed_perturbation  
+       ENDIF
+#endif
 
        ! Sea surface temperature in Celcius (jaegle 5/11/11)
        SST = ExtState%TSKIN%Arr%Val(I,J) - 273.15d0
